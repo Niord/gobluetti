@@ -26,7 +26,7 @@ func Encode(tok *gobluetti.Token) []byte {
 
 // Load reads a token file. A missing file gives an error matching fs.ErrNotExist.
 func Load(path string) (*gobluetti.Token, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // the path is the user's own command-line argument
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}

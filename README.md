@@ -8,9 +8,9 @@ It is a Go port of the cloud part of the official
 [BLUETTI Home Assistant integration](https://github.com/bluetti-official/bluetti-home-assistant),
 without any Home Assistant dependencies. This is an unofficial project, not affiliated with BLUETTI.
 
-> **Status: early development.** Login, device list and state, commands, and real-time change
-> notifications work; the API may still change. Do not depend on this module until the first
-> tagged release.
+> **Status: v0, before a stable API.** Login, device list and state, commands, and real-time
+> change notifications work and were checked against a real account. Until v1.0.0 the API may
+> change between minor versions, so pin a version.
 
 ## Scope
 
@@ -20,7 +20,7 @@ without any Home Assistant dependencies. This is an unofficial project, not affi
 - Supported stations are the ones marked "Cloud Control" in the
   [upstream support table](https://github.com/bluetti-official/bluetti-home-assistant#-power-station-support-list),
   for example AC300 and Apex 300 (AP300).
-- Planned features follow upstream: device list, state (battery SOC, PV, grid, AC and DC power),
+- Features follow upstream: device list, state (battery SOC, PV, grid, AC and DC power),
   AC/DC output switches, ECO modes, work mode, and live updates.
 
 ## Why no Bluetooth
