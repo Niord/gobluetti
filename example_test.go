@@ -56,3 +56,42 @@ func ExampleAuth_Exchange() {
 		_ = tok // store the token for this user
 	})
 }
+
+func ExampleClient() {
+	var tok *gobluetti.Token // loaded from where OnToken stored it last time
+	c := gobluetti.NewClient(nil, tok)
+	c.OnToken = func(tok *gobluetti.Token) {
+		// Persist every new token: SSO rotates refresh tokens.
+	}
+
+	ctx := context.Background()
+	devs, err := c.Devices(ctx)
+	if err != nil {
+		log.Fatal(err) // errors.Is(err, gobluetti.ErrLoginRequired): log in again
+	}
+	for _, d := range devs {
+		soc, _ := d.State(gobluetti.FnSOC)
+		fmt.Println(d.Model, d.Online, soc.Value)
+	}
+
+	// Turn the AC output off. This switches the real station.
+	if err := c.Set(ctx, devs[0].SN, gobluetti.FnACOutput, "0"); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func ExampleClient_Watch() {
+	var c *gobluetti.Client // from NewClient
+
+	ctx := context.Background()
+	err := c.Watch(ctx, func(sn string) {
+		dev, err := c.Device(ctx, sn)
+		if err != nil {
+			log.Print(err)
+			return
+		}
+		soc, _ := dev.State(gobluetti.FnSOC)
+		fmt.Println(sn, "SOC", soc.Value)
+	})
+	log.Fatal(err) // ErrLoginRequired, or ctx ended
+}

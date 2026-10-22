@@ -13,7 +13,6 @@ package main
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,11 +20,11 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"time"
 
 	"github.com/Niord/gobluetti"
+	"github.com/Niord/gobluetti/internal/tokenfile"
 )
 
 func main() {
@@ -69,15 +68,11 @@ func run(ctx context.Context, auth *gobluetti.Auth, openBrowser func(url string)
 
 	var tok *gobluetti.Token
 	if *refreshPath != "" {
-		data, err := os.ReadFile(*refreshPath)
+		old, err := tokenfile.Load(*refreshPath)
 		if err != nil {
 			return err
 		}
-		var old gobluetti.Token
-		if err := json.Unmarshal(data, &old); err != nil {
-			return fmt.Errorf("%s is not a token file: %w", *refreshPath, err)
-		}
-		if tok, err = auth.Refresh(ctx, &old); err != nil {
+		if tok, err = auth.Refresh(ctx, old); err != nil {
 			return err
 		}
 		*out = cmp.Or(*out, *refreshPath)
@@ -97,13 +92,11 @@ func run(ctx context.Context, auth *gobluetti.Auth, openBrowser func(url string)
 		}
 	}
 
-	data, _ := json.MarshalIndent(tok, "", "  ") //nolint:gosec // writing the token is this command's job; a Token always marshals
-	data = append(data, '\n')
 	if *out == "" {
-		if _, err := stdout.Write(data); err != nil {
+		if _, err := stdout.Write(tokenfile.Encode(tok)); err != nil {
 			return err
 		}
-	} else if err := writeFileAtomic(*out, data); err != nil {
+	} else if err := tokenfile.Save(*out, tok); err != nil {
 		return err
 	}
 
@@ -118,18 +111,4 @@ func run(ctx context.Context, auth *gobluetti.Auth, openBrowser func(url string)
 	_, _ = fmt.Fprintf(stderr, "Token written: expires %s, host %s, refresh token: %s\n",
 		expiry, cmp.Or(tok.Host, "unknown"), hasRefresh) // the token is already written
 	return nil
-}
-
-// writeFileAtomic replaces path with data, mode 0600, so a failure never leaves a partial file.
-func writeFileAtomic(path string, data []byte) error {
-	f, err := os.CreateTemp(filepath.Dir(path), ".gobluetti-token-*") // created with mode 0600
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(f.Name()) }() // fails harmlessly after a successful rename
-	_, err = f.Write(data)
-	if err := errors.Join(err, f.Sync(), f.Close()); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), path)
 }

@@ -8,8 +8,9 @@ It is a Go port of the cloud part of the official
 [BLUETTI Home Assistant integration](https://github.com/bluetti-official/bluetti-home-assistant),
 without any Home Assistant dependencies. This is an unofficial project, not affiliated with BLUETTI.
 
-> **Status: early development.** Only logging in (OAuth2 tokens) is implemented so far, and the API
-> may still change. Do not depend on this module until the first tagged release.
+> **Status: early development.** Login, device list and state, commands, and real-time change
+> notifications work; the API may still change. Do not depend on this module until the first
+> tagged release.
 
 ## Scope
 
@@ -37,6 +38,7 @@ If you need local Bluetooth control, look at
 
 - Go 1.26 or newer.
 - A BLUETTI account with the station added in the BLUETTI app.
+- One dependency: `golang.org/x/net` from the Go team, for the websocket only.
 
 ## Installation
 
@@ -79,6 +81,50 @@ longer valid; log in again in that case.
 
 The token grants full access to the account. `gobluetti-login` creates token files with mode
 `0600`; keep them out of version control and backups that others can read.
+
+## Using the client
+
+```go
+c := gobluetti.NewClient(nil, tok)
+c.OnToken = func(tok *gobluetti.Token) { /* persist it */ }
+
+devs, err := c.Devices(ctx) // every station with its states
+soc, _ := devs[0].State(gobluetti.FnSOC)
+fmt.Println(devs[0].Model, soc.Value, soc.Unit)
+
+err = c.Set(ctx, devs[0].SN, gobluetti.FnACOutput, "0") // AC output off
+
+err = c.Watch(ctx, func(sn string) { // blocks; called when a station changes
+	dev, _ := c.Device(ctx, sn)
+	// ...
+})
+```
+
+- A station is a list of states, exactly as the cloud describes it. Every state has a function
+  code, a string value, and a type: `SENSOR`, `SWITCH` (`"1"`/`"0"`), or `SELECT`, which comes
+  with its `Options`. The `Fn*` constants name the codes the official integration knows. Run
+  `gobluetti device <sn>` to see what your station reports.
+- The client renews the token by itself and calls `OnToken` with every new one. **Persist it**:
+  BLUETTI rotates refresh tokens, so the old token stops working. When renewal is impossible,
+  calls fail with `ErrLoginRequired`: log in again.
+- **Bind each device once** with `c.Bind(ctx, sn)` (or `gobluetti bind <sn>`), as the official
+  integration does during setup. Until then commands fail with `msgCode 403` ("device does not
+  belong to the current user"), even though the device list shows the device.
+- A `Client` is safe for concurrent use.
+
+## Command line
+
+```bash
+go install github.com/Niord/gobluetti/cmd/gobluetti@latest
+gobluetti devices                    # serial number, model, name, online/offline
+gobluetti device <sn>                # every state: code, type, value, options
+gobluetti set <sn> SetACECO 1        # one command; switches the real station
+gobluetti watch                      # prints a line whenever a station changes
+gobluetti bind <sn> [<sn>]           # once per station, before the first set
+```
+
+It reads `~/.config/gobluetti/token.json` (`-token` to change it), the file that
+`gobluetti-login -o` writes, and saves renewed tokens back to it.
 
 ## Safety
 

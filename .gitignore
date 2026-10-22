@@ -6,3 +6,6 @@
 
 # Local agent instructions, not published.
 /CLAUDE.md
+
+# Local skills installs.
+/skills-lock.json
