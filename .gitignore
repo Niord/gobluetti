@@ -1,0 +1,8 @@
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
+# Claude Code / OpenSpec tool files — regenerate with `openspec init --tools claude`.
+/.claude/
+
+# Local agent instructions, not published.
+/CLAUDE.md
