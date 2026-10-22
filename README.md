@@ -8,8 +8,8 @@ It is a Go port of the cloud part of the official
 [BLUETTI Home Assistant integration](https://github.com/bluetti-official/bluetti-home-assistant),
 without any Home Assistant dependencies. This is an unofficial project, not affiliated with BLUETTI.
 
-> **Status: early development.** There is no public API yet. Do not depend on this module until
-> the first tagged release.
+> **Status: early development.** Only logging in (OAuth2 tokens) is implemented so far, and the API
+> may still change. Do not depend on this module until the first tagged release.
 
 ## Scope
 
@@ -43,6 +43,42 @@ If you need local Bluetooth control, look at
 ```bash
 go get github.com/Niord/gobluetti
 ```
+
+## Logging in
+
+Every call needs an OAuth2 token for your BLUETTI account. There are three ways to get one.
+
+**Command line, for headless services.** Run the login on a machine with a browser and copy
+the token file to the server:
+
+```bash
+go run github.com/Niord/gobluetti/cmd/gobluetti-login@latest -o token.json
+# later, renew a stored token without a browser:
+go run github.com/Niord/gobluetti/cmd/gobluetti-login@latest -refresh token.json
+```
+
+**From Go, on a machine with a browser.** `LoginLocal` listens on `127.0.0.1`, waits for the
+browser to come back from the BLUETTI login page, and returns the token:
+
+```go
+var auth gobluetti.Auth // zero value: BLUETTI SSO with the default client identity
+
+tok, err := auth.LoginLocal(ctx, func(url string) error {
+	fmt.Println("Open this URL to log in:", url)
+	return nil
+})
+// Store tok (it marshals to JSON) and renew it before it expires:
+tok, err = auth.Refresh(ctx, tok)
+```
+
+**From a web application.** Use your own redirect URL with `AuthCodeURL` and `Exchange`; see
+`ExampleAuth_Exchange` in the package documentation.
+
+`Refresh` returns an `*OAuthError` with `Code == "invalid_grant"` when the refresh token is no
+longer valid; log in again in that case.
+
+The token grants full access to the account. `gobluetti-login` creates token files with mode
+`0600`; keep them out of version control and backups that others can read.
 
 ## Safety
 

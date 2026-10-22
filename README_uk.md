@@ -8,8 +8,8 @@
 [інтеграції BLUETTI для Home Assistant](https://github.com/bluetti-official/bluetti-home-assistant),
 без жодних залежностей від Home Assistant. Проєкт неофіційний і не пов'язаний з BLUETTI.
 
-> **Статус: рання розробка.** Публічного API ще немає. Не підключайте цей модуль до першого
-> релізу з тегом.
+> **Статус: рання розробка.** Поки що реалізовано лише вхід в акаунт (OAuth2-токени), і API ще
+> може змінитися. Не підключайте цей модуль до першого релізу з тегом.
 
 ## Межі проєкту
 
@@ -44,6 +44,42 @@
 ```bash
 go get github.com/Niord/gobluetti
 ```
+
+## Вхід в акаунт
+
+Кожен виклик потребує OAuth2-токена вашого акаунта BLUETTI. Отримати його можна трьома способами.
+
+**Командний рядок, для headless-сервісів.** Виконайте вхід на машині з браузером і скопіюйте
+файл токена на сервер:
+
+```bash
+go run github.com/Niord/gobluetti/cmd/gobluetti-login@latest -o token.json
+# пізніше оновіть збережений токен без браузера:
+go run github.com/Niord/gobluetti/cmd/gobluetti-login@latest -refresh token.json
+```
+
+**З Go, на машині з браузером.** `LoginLocal` слухає `127.0.0.1`, чекає, доки браузер
+повернеться зі сторінки входу BLUETTI, і повертає токен:
+
+```go
+var auth gobluetti.Auth // нульове значення: BLUETTI SSO з ідентичністю клієнта за замовчуванням
+
+tok, err := auth.LoginLocal(ctx, func(url string) error {
+	fmt.Println("Open this URL to log in:", url)
+	return nil
+})
+// Збережіть tok (він серіалізується в JSON) і оновлюйте його до закінчення терміну дії:
+tok, err = auth.Refresh(ctx, tok)
+```
+
+**З вебзастосунку.** Використовуйте власний redirect URL з `AuthCodeURL` та `Exchange`; див.
+`ExampleAuth_Exchange` у документації пакета.
+
+`Refresh` повертає `*OAuthError` з `Code == "invalid_grant"`, коли refresh token більше не
+дійсний; у такому разі увійдіть знову.
+
+Токен дає повний доступ до акаунта. `gobluetti-login` створює файли токена з правами `0600`;
+не додавайте їх у систему контролю версій і в бекапи, які можуть читати інші.
 
 ## Безпека
 
