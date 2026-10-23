@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"time"
 
@@ -80,18 +81,56 @@ func ExampleClient() {
 	}
 }
 
+// The callback hands each push to its own goroutine and returns at once: the
+// cloud's REST API can hang while pushes keep arriving.
+func ExampleClient_WatchUpdates() {
+	var c *gobluetti.Client // from NewClient
+
+	updates := make(chan gobluetti.Update, 16)
+	go func() {
+		last := map[string]map[string]string{} // sn → function code → value
+		for u := range updates {
+			if last[u.SN] == nil {
+				last[u.SN] = map[string]string{}
+			}
+			maps.Copy(last[u.SN], u.Values) // a push carries only some readings
+			fmt.Println(u.SN, "SOC", last[u.SN][gobluetti.FnSOC], "at", u.Time)
+		}
+	}()
+
+	err := c.WatchUpdates(context.Background(), func(u gobluetti.Update) {
+		select {
+		case updates <- u:
+		default: // the consumer is behind; the next push brings fresh readings
+		}
+	})
+	log.Fatal(err) // ErrLoginRequired, or ctx ended
+}
+
+// Watch reports only which station changed. Read its state outside the
+// callback, so a hanging REST call does not hold up later notifications.
 func ExampleClient_Watch() {
 	var c *gobluetti.Client // from NewClient
 
 	ctx := context.Background()
-	err := c.Watch(ctx, func(sn string) {
-		dev, err := c.Device(ctx, sn)
-		if err != nil {
-			log.Print(err)
-			return
+	changed := make(chan string, 16)
+	go func() {
+		for sn := range changed {
+			dev, err := c.Device(ctx, sn)
+			if err != nil {
+				log.Print(err)
+				continue
+			}
+			soc, _ := dev.State(gobluetti.FnSOC)
+			fmt.Println(sn, "SOC", soc.Value)
 		}
-		soc, _ := dev.State(gobluetti.FnSOC)
-		fmt.Println(sn, "SOC", soc.Value)
+	}()
+
+	err := c.Watch(ctx, func(sn string) {
+		select {
+		case changed <- sn:
+		default: // the reader is 16 changes behind; skip this one
+		}
 	})
 	log.Fatal(err) // ErrLoginRequired, or ctx ended
 }

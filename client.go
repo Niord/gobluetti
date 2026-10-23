@@ -30,6 +30,10 @@ const (
 	refreshInterval     = time.Hour          // and not more often than this
 )
 
+// apiHTTPClient is the default for gateway API calls. A healthy gateway answers
+// in well under a second; a hanging one may never answer.
+var apiHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
 var (
 	// ErrLoginRequired means the token cannot be renewed: the user has to log
 	// in again, for example with [Auth.LoginLocal].
@@ -76,7 +80,7 @@ type Client struct {
 	OnToken func(*Token)
 
 	GatewayURL string       // optional; default: https://gw.bluettipower.com; a token Host wins
-	HTTPClient *http.Client // optional; default: a client with a 30s timeout
+	HTTPClient *http.Client // optional; default: a client with a 15s timeout
 
 	auth *Auth
 
@@ -195,7 +199,7 @@ func (c *Client) send(ctx context.Context, tok *Token, method, path string, quer
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := cmp.Or(c.HTTPClient, defaultHTTPClient).Do(req)
+	resp, err := cmp.Or(c.HTTPClient, apiHTTPClient).Do(req)
 	if err != nil {
 		return false, fmt.Errorf("gobluetti: %s %s: %w", method, path, err)
 	}

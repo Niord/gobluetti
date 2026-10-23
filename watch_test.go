@@ -369,3 +369,70 @@ func TestWatchURL(t *testing.T) {
 		t.Errorf("apiBase(no host, no gateway) = %q, want https://gw.bluettipower.com", got)
 	}
 }
+
+func TestWatchUpdatesWithoutREST(t *testing.T) {
+	push := readPush(t, "realtime-main")
+	var rest atomic.Int32
+	ws := websocket.Handler(func(ws *websocket.Conn) {
+		p := stompPeer{t: t, ws: ws}
+		p.next()
+		p.send(connected)
+		p.next()
+		p.send("MESSAGE\ndestination:/ws-subscribe/user/u42/notify\n\n" + push + "\x00")
+		p.next()
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/edgeiotgw/ws-coordination/websocket" {
+			ws.ServeHTTP(w, r)
+			return
+		}
+		rest.Add(1)
+		<-r.Context().Done() // the REST API hangs
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var got Update
+	err := newWatchClient(srv.URL, nil, Token{AccessToken: "acc"}).WatchUpdates(ctx, func(u Update) {
+		got = u
+		cancel()
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("WatchUpdates() error = %v, want context.Canceled after the push", err)
+	}
+	if got.SN != "SN1" || got.Values[FnSOC] != "80" || got.Values[FnACLoadPower] != "480" {
+		t.Errorf("WatchUpdates() update = %+v, want SN1 with SOC 80 and AC load 480", got)
+	}
+	if n := rest.Load(); n != 0 {
+		t.Errorf("WatchUpdates() made %d REST requests, want 0", n)
+	}
+}
+
+func TestWatchSilentSession(t *testing.T) {
+	gwURL, attempts := fakeWatchGateway(t, nil, func(n int, p stompPeer) {
+		p.next()
+		if n == 1 {
+			p.send("CONNECTED\nheart-beat:0,0\nuser-name:u42\n\n\x00") // then nothing, as a dead gateway session
+			p.next()
+			p.next() // reads keep-alives until the client drops the session
+			return
+		}
+		p.send(connected)
+		p.next()
+		p.send(notify("SN1"))
+		p.next()
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := newWatchClient(gwURL, nil, Token{AccessToken: "acc"}).Watch(ctx, func(string) { cancel() }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Watch() error = %v, want context.Canceled after the notification", err)
+	}
+	at := attempts()
+	if len(at) < 2 {
+		t.Fatalf("Watch() made %d connections, want a reconnect after the silence", len(at))
+	}
+	if gap, want := at[1].Sub(at[0]), silentSteps*20*time.Millisecond; gap < want || gap > 3*want {
+		t.Errorf("reconnect after a silent heart-beat:0,0 session came after %v, want about %v", gap, want)
+	}
+}

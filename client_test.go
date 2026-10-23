@@ -380,3 +380,67 @@ func TestSetAndBind(t *testing.T) {
 		})
 	}
 }
+
+func TestDeviceStates(t *testing.T) {
+	const statesJSON = `[{"sn":"SN1","name":null,"model":null,"online":"1","isBindByCurUser":"1","supportNetwork":"1",
+		"stateList":[{"fnCode":"SOC","fnName":"Battery","fnValue":"100","fnType":"SENSOR"}]},
+		{"sn":"SN2","online":"0","isBindByCurUser":"1","supportNetwork":"1","stateList":[]}]`
+	tests := []struct {
+		name      string
+		sns       []string
+		reply     func(gatewayRequest) (int, string)
+		wantQuery string // "" means no request
+		want      []gobluetti.Device
+		wantCode  int // msgCode of the expected *APIError
+		wantErr   bool
+	}{
+		{
+			name:      "two devices",
+			sns:       []string{"SN1", "SN2"},
+			reply:     func(gatewayRequest) (int, string) { return ok(statesJSON) },
+			wantQuery: "sns=SN1%2CSN2",
+			want: []gobluetti.Device{
+				{SN: "SN1", Online: true, Bound: true, NetworkSupported: true, States: []gobluetti.State{
+					{Code: gobluetti.FnSOC, Name: "Battery", Value: "100", Type: gobluetti.StateSensor},
+				}},
+				{SN: "SN2", Bound: true, NetworkSupported: true, States: []gobluetti.State{}},
+			},
+		},
+		{
+			name: "unknown serial number",
+			sns:  []string{"SN1", "SN9"},
+			reply: func(gatewayRequest) (int, string) {
+				return http.StatusOK, `{"msgId":"m","msgCode":1,"message":"Wrong parameter: device does not exist"}`
+			},
+			wantQuery: "sns=SN1%2CSN9",
+			wantCode:  1,
+			wantErr:   true,
+		},
+		{name: "no serial numbers", wantErr: true},
+		{name: "empty serial number", sns: []string{"SN1", ""}, wantErr: true},
+		{name: "serial number with a comma", sns: []string{"SN1,SN2"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g, gwURL := newFakeGateway(t, func(r gatewayRequest) (int, string) { return tt.reply(r) })
+			got, err := newTestClient(gwURL, nil, gobluetti.Token{AccessToken: "acc"}).DeviceStates(t.Context(), tt.sns...)
+			if gotErr := err != nil; gotErr != tt.wantErr {
+				t.Fatalf("DeviceStates(%q) error = %v, want error %t", tt.sns, err, tt.wantErr)
+			}
+			if apiErr, isAPI := errors.AsType[*gobluetti.APIError](err); tt.wantCode != 0 && (!isAPI || apiErr.MsgCode != tt.wantCode) {
+				t.Errorf("DeviceStates(%q) error = %v, want *APIError with msgCode %d", tt.sns, err, tt.wantCode)
+			}
+			reqs := g.requests()
+			switch {
+			case tt.wantQuery == "" && len(reqs) != 0:
+				t.Errorf("DeviceStates(%q) sent %d requests, want none", tt.sns, len(reqs))
+			case tt.wantQuery != "" && (len(reqs) != 1 || reqs[0].method != http.MethodGet ||
+				reqs[0].path != "/api/bluiotdata/ha/v1/deviceStates" || reqs[0].query != tt.wantQuery):
+				t.Errorf("DeviceStates(%q) requests = %+v, want one GET /api/bluiotdata/ha/v1/deviceStates?%s", tt.sns, reqs, tt.wantQuery)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("DeviceStates(%q) =\n%+v\nwant\n%+v", tt.sns, got, tt.want)
+			}
+		})
+	}
+}

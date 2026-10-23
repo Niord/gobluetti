@@ -94,9 +94,8 @@ fmt.Println(devs[0].Model, soc.Value, soc.Unit)
 
 err = c.Set(ctx, devs[0].SN, gobluetti.FnACOutput, "0") // AC output off
 
-err = c.Watch(ctx, func(sn string) { // blocks; called when a station changes
-	dev, _ := c.Device(ctx, sn)
-	// ...
+err = c.WatchUpdates(ctx, func(u gobluetti.Update) { // blocks; called for every push
+	fmt.Println(u.SN, u.Values[gobluetti.FnSOC])
 })
 ```
 
@@ -111,6 +110,33 @@ err = c.Watch(ctx, func(sn string) { // blocks; called when a station changes
   integration does during setup. Until then commands fail with `msgCode 403` ("device does not
   belong to the current user"), even though the device list shows the device.
 - A `Client` is safe for concurrent use.
+- API calls time out after 15 seconds unless you set `c.HTTPClient`.
+
+### Live state from pushes
+
+The cloud's REST API (`Devices`, `Device`, `DeviceStates`) can hang or time out for hours while
+its websocket keeps pushing station readings about once a minute. `WatchUpdates` gives you those
+readings without any REST call:
+
+```go
+last := map[string]map[string]string{} // sn → function code → value
+err = c.WatchUpdates(ctx, func(u gobluetti.Update) {
+	if last[u.SN] == nil {
+		last[u.SN] = map[string]string{}
+	}
+	maps.Copy(last[u.SN], u.Values) // a push carries only some readings: merge, do not replace
+})
+```
+
+- `u.Values` holds readings by function code: SOC, grid, AC, PV and DC power, the AC output
+  switch, and the battery time left. `u.Fields` holds every reading under the cloud's own
+  names, for example `batteryVoltage`. `u.Time` is when the station reported.
+- The callback runs on the goroutine that reads the websocket, one push at a time. **Return
+  quickly**: hand the update to your own goroutine and do REST calls there. A callback that
+  blocks delays every later push.
+- `Watch(ctx, func(sn string))` still works and reports only which station changed.
+- `c.DeviceStates(ctx, sn1, sn2)` reads current values for several stations in one request. It
+  is lighter than `Devices`, but has no names, options, or units.
 
 ## Command line
 

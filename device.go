@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
+	"strings"
 )
 
 // Function codes that the BLUETTI Home Assistant integration knows. A device
@@ -98,9 +100,8 @@ func (c *Client) Devices(ctx context.Context) ([]Device, error) {
 // Device reads the current state of the device with serial number sn. It
 // returns an error matching [ErrDeviceNotFound] when the account has no such device.
 //
-// It reads the device list, not the upstream deviceStates endpoint: for an
-// AP300 that endpoint returned an empty, offline, unbound placeholder, and for
-// other devices it omits options and sensor info.
+// It reads the device list rather than [Client.DeviceStates], which has no
+// names, options, or units.
 func (c *Client) Device(ctx context.Context, sn string) (*Device, error) {
 	devs, err := c.Devices(ctx)
 	if err != nil {
@@ -111,6 +112,28 @@ func (c *Client) Device(ctx context.Context, sn string) (*Device, error) {
 		return nil, fmt.Errorf("gobluetti: device %q: %w", sn, ErrDeviceNotFound)
 	}
 	return &devs[i], nil
+}
+
+// DeviceStates reads the current values of the devices with serial numbers sns
+// in one request, from the lighter deviceStates endpoint. Each device carries
+// SN, Online, Bound, NetworkSupported, and States with Code, Name, Value, and
+// Type only: the endpoint sends no device names, models, options, sensor
+// types, or units; [Client.Devices] has them. One unknown serial number fails
+// the whole call with an [*APIError] with MsgCode 1.
+func (c *Client) DeviceStates(ctx context.Context, sns ...string) ([]Device, error) {
+	if len(sns) == 0 || slices.ContainsFunc(sns, func(sn string) bool { return sn == "" || strings.Contains(sn, ",") }) {
+		return nil, fmt.Errorf("gobluetti: device states: invalid serial numbers %q", sns)
+	}
+	var list []wireDevice
+	query := url.Values{"sns": {strings.Join(sns, ",")}}
+	if err := c.call(ctx, http.MethodGet, "/api/bluiotdata/ha/v1/deviceStates", query, nil, &list); err != nil {
+		return nil, err
+	}
+	devs := make([]Device, len(list))
+	for i, w := range list {
+		devs[i] = w.device()
+	}
+	return devs, nil
 }
 
 // Set sends one command: it sets the function code of device sn to value. It

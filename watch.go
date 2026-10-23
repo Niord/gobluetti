@@ -16,24 +16,76 @@ import (
 const (
 	watchPath       = "/api/edgeiotgw/ws-coordination/websocket"
 	connectTimeout  = 30 * time.Second // dial plus waiting for CONNECTED
-	silentTimeout   = 10 * time.Minute // read timeout when the server announces no heartbeats (the gateway sends heart-beat:0,0)
 	keepAliveSteps  = 6                // without a requested interval, send heartbeats every 6x the floor (60s, as upstream)
+	silentSteps     = 18               // without announced heartbeats, a session silent for 18x the floor (3 min) is dead
 	maxBackoffSteps = 30               // the reconnect delay grows to 30x the first one
 )
 
+// MessageRealtimeStatus is the [Update.Type] of the cloud's periodic device
+// reports, which carry readings.
+const MessageRealtimeStatus = "DEVICE_REALTIME_STATUS"
+
+// Update is one device notification pushed by the cloud. A push carries only
+// some readings: the device alternates between reports of its main readings
+// and of its battery pack, so a field missing from Values or Fields is not in
+// this push, not zero. Merge updates into the last known state.
+type Update struct {
+	SN   string
+	Type string    // the cloud's message type, for example [MessageRealtimeStatus]; may be empty
+	Time time.Time // when the device reported, from the push; zero if it has none
+
+	// Values holds readings by function code, for example [FnSOC]. Only a
+	// [MessageRealtimeStatus] push has them, and only for the codes whose push
+	// fields are known: SOC, the grid, AC, PV and DC powers, the AC output
+	// switch, and the battery time left.
+	Values map[string]string
+
+	// Fields holds every reading of the push as text, under the cloud's own
+	// field names, for example "batteryVoltage". The names are the cloud's and
+	// may change with it.
+	Fields map[string]string
+}
+
+// pushCodes maps realtime push fields to the function codes whose
+// values they matched in a capture from an AP300.
+var pushCodes = map[string]string{
+	"batterySoc":   FnSOC,
+	"powerGridIn":  FnGridPower,
+	"powerAcOut":   FnACLoadPower,
+	"powerPvIn":    FnPVPower,
+	"powerDcOut":   FnDCLoadPower,
+	"acSwitch":     FnACOutput,
+	"dsgEmptyTime": FnDischargeTime,
+}
+
+// pushTimeZone is the zone of payload.timestamp, which carries none: China
+// Standard Time, without daylight saving.
+var pushTimeZone = time.FixedZone("UTC+8", 8*60*60)
+
 // Watch reports device changes in real time. It calls onChange with the
-// serial number of every device the cloud says has changed; read the new state
-// with [Client.Device]. onChange runs on one goroutine, one call at a time, and
-// a slow onChange delays later notifications.
-//
-// Watch keeps a websocket subscription open and reconnects with backoff after
-// any failure. It returns only when ctx is done, or with an error matching
-// [ErrLoginRequired] when the token cannot be renewed.
+// serial number of every device the cloud says has changed. It works like
+// [Client.WatchUpdates] and drops what the push says about the new state.
 func (c *Client) Watch(ctx context.Context, onChange func(sn string)) error {
+	return c.WatchUpdates(ctx, func(u Update) { onChange(u.SN) })
+}
+
+// WatchUpdates reports device state in real time, from the cloud's pushes
+// alone: it makes no REST request. The cloud's REST API can be down for hours
+// while pushes keep arriving about once a minute.
+//
+// onUpdate runs on the goroutine that reads the websocket, one call at a time,
+// in arrival order. Keep it fast: copy what you need and return, and do REST
+// calls or other slow work elsewhere. A slow onUpdate delays later pushes, and
+// one that blocks for minutes makes the session look dead.
+//
+// WatchUpdates keeps a websocket subscription open and reconnects with backoff
+// after any failure. It returns only when ctx is done, or with an error
+// matching [ErrLoginRequired] when the token cannot be renewed.
+func (c *Client) WatchUpdates(ctx context.Context, onUpdate func(Update)) error {
 	delay := c.backoff
 	for {
 		tok := c.freshToken(ctx)
-		connected, authFailed := c.watchSession(ctx, tok, onChange)
+		connected, authFailed := c.watchSession(ctx, tok, onUpdate)
 		if ctx.Err() != nil {
 			return fmt.Errorf("gobluetti: watch: %w", ctx.Err())
 		}
@@ -59,7 +111,7 @@ func (c *Client) Watch(ctx context.Context, onChange func(sn string)) error {
 // watchSession runs one websocket connection until it fails or ctx is done. It
 // reports whether the server accepted the session (CONNECTED) and whether it
 // ended with an authentication error.
-func (c *Client) watchSession(ctx context.Context, tok *Token, onChange func(sn string)) (connected, authFailed bool) {
+func (c *Client) watchSession(ctx context.Context, tok *Token, onUpdate func(Update)) (connected, authFailed bool) {
 	conn, err := c.dialWatch(ctx, tok)
 	if err != nil {
 		return false, false
@@ -104,8 +156,8 @@ func (c *Client) watchSession(ctx context.Context, tok *Token, onChange func(sn 
 				}
 				connected = true
 			case "MESSAGE":
-				if sn := changedDevice(f.body); sn != "" {
-					onChange(sn)
+				if u, ok := parseUpdate(f.body); ok {
+					onUpdate(u)
 				}
 			case "ERROR":
 				return connected, isAuthError(f.headers["message"])
@@ -141,7 +193,7 @@ func (c *Client) subscribe(ctx context.Context, conn *websocket.Conn, connected 
 		}
 	})
 	if serverSend == 0 {
-		return silentTimeout, true
+		return silentSteps * c.heartbeat, true
 	}
 	return 2 * max(serverSend, c.heartbeat), true
 }
@@ -162,17 +214,46 @@ func (c *Client) dialWatch(ctx context.Context, tok *Token) (*websocket.Conn, er
 	return cfg.DialContext(ctx)
 }
 
-// changedDevice returns the serial number in a notification body, or "" when it has none.
-func changedDevice(body string) string {
+// parseUpdate reads a notification body. It reports false when the body has
+// no serial number. Each part is decoded on its own, so a malformed part loses
+// only itself.
+func parseUpdate(body string) (Update, bool) {
 	var doc struct {
 		Data struct {
-			Message struct {
-				DeviceSN string `json:"deviceSn"`
-			} `json:"message"`
+			Message map[string]json.RawMessage `json:"message"`
 		} `json:"data"`
 	}
-	_ = json.Unmarshal([]byte(body), &doc) // a malformed body has no serial number
-	return doc.Data.Message.DeviceSN
+	_ = json.Unmarshal([]byte(body), &doc) // a malformed body has no message
+	var u Update
+	if json.Unmarshal(doc.Data.Message["deviceSn"], &u.SN) != nil || u.SN == "" {
+		return Update{}, false
+	}
+	_ = json.Unmarshal(doc.Data.Message["messageType"], &u.Type) // no type: ""
+
+	var payload map[string]json.RawMessage
+	_ = json.Unmarshal(doc.Data.Message["payload"], &payload) // not an object: no readings
+	var stamp string
+	if json.Unmarshal(payload["timestamp"], &stamp) == nil {
+		u.Time, _ = time.ParseInLocation(time.DateTime, stamp, pushTimeZone) // unparseable: zero
+	}
+	for name, raw := range payload {
+		var value flexString
+		if name == "allFieldIsNull" || name == "timestamp" || string(raw) == "null" ||
+			raw[0] == '{' || raw[0] == '[' || json.Unmarshal(raw, &value) != nil {
+			continue
+		}
+		if u.Fields == nil {
+			u.Fields = map[string]string{}
+		}
+		u.Fields[name] = string(value)
+		if code, known := pushCodes[name]; known && u.Type == MessageRealtimeStatus {
+			if u.Values == nil {
+				u.Values = map[string]string{}
+			}
+			u.Values[code] = string(value)
+		}
+	}
+	return u, true
 }
 
 // isAuthError reports whether a STOMP ERROR message header carries a msgCode that
