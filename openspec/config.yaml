@@ -3,7 +3,9 @@ schema: spec-driven
 context: |
   Language: English. All artifacts must be written in English (the repository is public).
   Project: gobluetti, a Go library (github.com/Niord/gobluetti) that controls BLUETTI power
-  stations through the BLUETTI cloud only. Bluetooth/BLE is out of scope; see README.md ("Why no Bluetooth").
+  stations through the BLUETTI cloud. A separate nested module (github.com/Niord/gobluetti/ble)
+  supports legacy stations over plaintext Modbus on BLE; encrypted BLE models are out of scope;
+  see README.md ("Bluetooth (legacy stations)").
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.

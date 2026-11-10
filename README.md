@@ -16,23 +16,41 @@ without any Home Assistant dependencies. This is an unofficial project, not affi
 
 - **Cloud only.** The library talks to the BLUETTI cloud with your BLUETTI account
   (OAuth2). It needs internet access, and the station must be online in the BLUETTI app.
-- **No Bluetooth.** Local BLE control is out of scope (see below).
+- **Bluetooth only for legacy stations,** in a separate module (see below).
 - Supported stations are the ones marked "Cloud Control" in the
   [upstream support table](https://github.com/bluetti-official/bluetti-home-assistant#-power-station-support-list),
   for example AC300 and Apex 300 (AP300).
 - Features follow upstream: device list, state (battery SOC, PV, grid, AC and DC power),
   AC/DC output switches, ECO modes, work mode, and live updates.
 
-## Why no Bluetooth
+## Bluetooth (legacy stations)
 
-The official integration does not implement the BLE protocol in its source code. Encryption and
-frame decoding are in a closed native library that it downloads at runtime. That library is built
-for Linux and CPython only, and Go cannot use it. Community re-implementations depend on keys
-extracted from the BLUETTI app. We do not want to ship those keys or tie the library to a binary
-blob, so gobluetti uses the cloud only.
+The separate module `github.com/Niord/gobluetti/ble` reads and switches **legacy** stations over
+Bluetooth Low Energy, without the cloud and without an account. Supported: the AC200M family,
+which includes the AC200MAX. These stations speak plain Modbus over BLE with no encryption. The
+protocol and register map come from [bluetti_mqtt](https://github.com/warhammerkid/bluetti_mqtt) (MIT).
 
-If you need local Bluetooth control, look at
-[bluetti-bt-lib](https://github.com/Patrick762/bluetti-bt-lib) (Python).
+- Readings: input and output power, battery percent, AC/DC output state, and **each battery
+  pack** separately (voltage, percent, 16 cell voltages).
+- Controls: AC output and DC output on/off.
+- It is a separate Go module, so cloud-only users do not pull in its Bluetooth dependencies.
+- Not yet checked against a real station.
+
+```bash
+go install github.com/Niord/gobluetti/ble/cmd/gobluetti-ble@latest
+gobluetti-ble scan                      # lists stations nearby
+gobluetti-ble state AC200M<serial>
+gobluetti-ble pack AC200M<serial> 1     # selects pack 1 on the station, takes ~10 s
+gobluetti-ble set AC200M<serial> ac off # switches real power
+```
+
+On macOS, give the terminal Bluetooth access (System Settings → Privacy & Security → Bluetooth).
+
+Newer models (Apex, Elite, AC180, and others) encrypt their BLE link. The official integration
+does that in a closed native library that it downloads at runtime, built for Linux and CPython
+only. Community re-implementations depend on keys extracted from the BLUETTI app. We do not ship
+those keys or tie the library to a binary blob, so encrypted models are supported through the
+cloud only. For them, look at [bluetti-bt-lib](https://github.com/Patrick762/bluetti-bt-lib) (Python).
 
 ## Requirements
 
@@ -159,4 +177,5 @@ power to everything plugged into it.
 
 ## License
 
-[MIT](./LICENSE). Includes code ported from the BLUETTI Home Assistant integration, Copyright (c) 2025 Bluetti.
+[MIT](./LICENSE). Includes code ported from the BLUETTI Home Assistant integration, Copyright (c) 2025 Bluetti,
+and from bluetti_mqtt, Copyright 2022 Stephen Augenstein.
