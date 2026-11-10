@@ -8,10 +8,11 @@ their state and battery packs, and switch their AC and DC outputs over BLE.
 
 ### Requirement: Commands
 The tool SHALL accept exactly one of these commands:
-`scan`, `state <name>`, `pack <name> <n>`, `set <name> ac|dc on|off`. `<name>` is the station's
-advertised BLE name. An unknown command, a wrong number of arguments, a pack number that is not
-an integer, or a `set` argument outside `ac|dc` and `on|off` SHALL print the usage to stderr and
-exit with a non-zero status without using Bluetooth.
+`scan`, `state <name>`, `pack <name> <n>`, `set <name> ac|dc on|off`, `set <name> power off`,
+and `set <name> sleep 30s|1m|5m|never`. `<name>` is the station's advertised BLE name. An unknown
+command, a wrong number of arguments, a pack number that is not an integer, or a `set` argument
+outside those forms SHALL print the usage to stderr and exit with a non-zero status without
+using Bluetooth.
 
 #### Scenario: Invalid set argument
 - **WHEN** the user runs `gobluetti-ble set AC200M1 ac maybe`
@@ -37,8 +38,7 @@ stderr, with a non-zero exit status.
 - **THEN** the tool prints a line confirming the DC output of `AC200M1` is on and exits with 0
 
 ### Requirement: One command per run
-`set` SHALL send exactly one switch command and nothing else that changes the station. `state`
-and `pack` SHALL NOT switch any output.
+`set` SHALL send exactly one command and nothing else that changes the station. `power off` shuts the station down. `state` and `pack` SHALL NOT switch any output.
 
 #### Scenario: Pack read does not switch outputs
 - **WHEN** the user runs `gobluetti-ble pack AC200M1 2`

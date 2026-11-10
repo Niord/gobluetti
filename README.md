@@ -30,20 +30,25 @@ Bluetooth Low Energy, without the cloud and without an account. Supported: the A
 which includes the AC200MAX. These stations speak plain Modbus over BLE with no encryption. The
 protocol and register map come from [bluetti_mqtt](https://github.com/warhammerkid/bluetti_mqtt) (MIT).
 
-- Readings: input and output power, battery percent, AC/DC output state, and **each battery
-  pack** separately (voltage, percent, 16 cell voltages).
-- Controls: AC output and DC output on/off.
+- Readings: input and output power, total generation, battery percent and voltage, ARM and DSP
+  firmware, AC mode, voltage, current and frequency, DC input voltage and current, auto sleep,
+  AC/DC output state, and **each battery pack** separately (voltage, percent, 16 cell voltages).
+  `PackSlots` is the number of pack slots, not how many packs are installed. `pack` on an
+  empty slot returns `ErrNoPack`.
+- Controls: AC output and DC output on/off, auto sleep (30s, 1m, 5m, never), and power off.
 - It is a separate Go module, so cloud-only users do not pull in its Bluetooth dependencies.
 - Checked on an AC200MAX: reading the state and packs, and switching an output.
 - Legacy stations have no Bluetooth pairing or password: anyone within radio range can connect with any BLE tool, including the BLUETTI app. This is the station's protocol, not something the library adds or can prevent.
-- `state` shows pack slots (3 on the AC200MAX), not connected packs; `pack` on an empty slot reports that no pack is connected.
+- `state` shows pack slots (3 on the AC200MAX), not connected packs, plus battery voltage and ARM and DSP firmware. `pack` on an empty slot reports that no pack is connected.
 
 ```bash
 go install github.com/Niord/gobluetti/ble/cmd/gobluetti-ble@latest
 gobluetti-ble scan                      # lists stations nearby
 gobluetti-ble state AC200M<serial>
 gobluetti-ble pack AC200M<serial> 1     # selects pack 1 on the station, takes ~10 s
-gobluetti-ble set AC200M<serial> ac off # switches real power
+gobluetti-ble set AC200M<serial> ac off    # switches real power
+gobluetti-ble set AC200M<serial> sleep 5m  # how long before the station sleeps
+gobluetti-ble set AC200M<serial> power off # shuts the station down
 ```
 
 On macOS, give the terminal Bluetooth access (System Settings → Privacy & Security → Bluetooth).

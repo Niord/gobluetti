@@ -86,16 +86,26 @@ response does not complete within 5 seconds, and SHALL NOT retry a failed reques
 - **THEN** the read returns a timeout error
 
 ### Requirement: Station state
-Reading the state SHALL read registers 10–49 and register 91, and SHALL decode:
+Reading the state SHALL read registers 10–49, 70–90, 91–92, and 3061, and SHALL decode:
 device type (registers 10–15, ASCII, trailing NUL bytes dropped), serial number (registers 17–20,
-least significant word first), DC input power W (36), AC input power W (37), AC output power W
-(38), DC output power W (39), battery percent (43), AC output on (48, value 1), DC output on (49,
-value 1), and the pack slot count (91). Every register is an unsigned
-16-bit big-endian value.
+least significant word first), ARM firmware (registers 23–24) and DSP firmware (registers 25–26)
+as a 32-bit value with the first register in the low 16 bits, divided by 100 and shown with two
+decimal places, DC input power W (36), AC input power W (37), AC output power W (38), DC output
+power W (39), total generation kWh (41, value / 10), battery percent (43), battery voltage V
+(92, value / 100), AC output on (48, value 1), DC output on (49, value 1), the pack slot count
+(91), AC output mode (70: 0 stop, 1 inverter, 2 bypass C, 3 bypass D, 4 load matching), AC
+voltage V (71), AC current A (72, value / 10), inverter power W (73), AC frequency Hz (74, value
+/ 10), DC input voltage V (86), measured DC input power W (87, value / 10), DC input current A
+(88, value / 100), and auto sleep (3061: 2 is 30s, 3 is 1m, 4 is 5m, 5 is never). Register 91
+is not the number of installed packs. Every register is an unsigned 16-bit big-endian value.
 
 #### Scenario: Decoding a state
-- **WHEN** register 37 is `0x01F4`, register 43 is `0x0055`, register 48 is `1`, and register 49 is `0`
-- **THEN** the state has AC input 500 W, battery 85 %, AC output on, and DC output off
+- **WHEN** register 23 is `100`, register 24 is `0`, register 25 is `50`, register 26 is `1`, register 37 is `0x01F4`, register 43 is `0x0055`, register 48 is `1`, register 49 is `0`, register 91 is `2`, and register 92 is `5324`
+- **THEN** the state has ARM firmware `1.00`, DSP firmware `655.86`, AC input 500 W, battery 85 %, battery voltage 53.24 V, 2 pack slots, AC output on, and DC output off
+
+#### Scenario: AC path, DC input sensors, and auto sleep
+- **WHEN** register 41 is `100`, register 70 is `1`, register 71 is `230`, register 72 is `20`, register 73 is `300`, register 74 is `500`, register 86 is `48`, register 87 is `1200`, register 88 is `250`, and register 3061 is `5`
+- **THEN** the state has 10.0 kWh generated, AC mode inverter, 230 V, 2.0 A, inverter power 300 W, 50.0 Hz, DC input 48 V, measured DC input 120.0 W, DC input current 2.50 A, and auto sleep never
 
 #### Scenario: Pack slots are not connected packs
 - **WHEN** an AC200MAX with only its internal pack reports register 91 as `3`
@@ -137,8 +147,10 @@ return an error that wraps `ErrNoPack` instead of zero readings.
 ### Requirement: Output switches
 Switching the AC output SHALL write register 3007, and switching the DC output SHALL write
 register 3008: value `1` for on and `0` for off, as exactly one write request. The write SHALL
-succeed only when the response echoes the register and value. The library SHALL NOT write any
-register other than 3006, 3007, and 3008.
+succeed only when the response echoes the register and value. Powering the station off SHALL
+write `1` to register 3060, once. Setting auto sleep SHALL write one of `2`, `3`, `4`, or `5`
+to register 3061, once, and SHALL reject any other value without a write. The library SHALL NOT
+write any register other than 3006, 3007, 3008, 3060, and 3061.
 
 #### Scenario: AC output off
 - **WHEN** the caller switches the AC output off
@@ -147,6 +159,14 @@ register other than 3006, 3007, and 3008.
 #### Scenario: Echo mismatch
 - **WHEN** the station answers a DC-on write with an echo of value `0`
 - **THEN** the call returns an error
+
+#### Scenario: Power off
+- **WHEN** the caller powers the station off
+- **THEN** the library writes `01 06 0B F4 00 01` followed by its CRC, once
+
+#### Scenario: Auto sleep rejected
+- **WHEN** the caller sets auto sleep to a value other than 30s, 1m, 5m, or never
+- **THEN** an error is returned and no frame is written
 
 ### Requirement: Closing
 Closing a connection SHALL disconnect from the station. Requests on a closed connection SHALL

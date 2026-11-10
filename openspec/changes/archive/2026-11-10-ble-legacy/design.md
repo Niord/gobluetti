@@ -87,13 +87,25 @@ func (c *Conn) State(ctx context.Context) (State, error)
 func (c *Conn) Pack(ctx context.Context, n int) (Pack, error)
 func (c *Conn) SetACOutput(ctx context.Context, on bool) error
 func (c *Conn) SetDCOutput(ctx context.Context, on bool) error
+func (c *Conn) PowerOff(ctx context.Context) error
+func (c *Conn) SetAutoSleep(ctx context.Context, mode AutoSleep) error
 func (c *Conn) Close() error
 
 type State struct {
     DeviceType                                string
     Serial                                    uint64
     DCInputW, ACInputW, ACOutputW, DCOutputW  int
-    BatteryPercent, PackSlots                 int
+    BatteryPercent                            int
+    BatteryVoltage                            float64 // V
+    PackSlots                                 int     // maximum slots, register 91
+    ARMVersion, DSPVersion                    string
+    PowerGenerationKWh                        float64
+    ACMode                                    ACMode  // register 70
+    ACVoltageV, ACInverterW                   int
+    ACCurrentA, ACFrequencyHz                 float64
+    DCInputVoltageV                           int
+    DCInputMeasuredW, DCInputCurrentA         float64
+    AutoSleep                                 AutoSleep // register 3061
     ACOutputOn, DCOutputOn                    bool
 }
 type Pack struct {
@@ -106,8 +118,8 @@ type ModbusError struct{ Function, Code byte } // exception response
 
 The cloud API passes strings keyed by function code because the server defines the set. Here we
 decode fixed registers ourselves, so typed fields with units in their names are clearer. Writes
-are two named methods instead of a generic `Set(register, value)`. That way the library cannot
-write a register outside the three allowed by the spec.
+are named methods instead of a generic `Set(register, value)`. That way the library cannot
+write a register outside 3006, 3007, 3008, 3060, and 3061.
 
 ### 5. No retries, one request at a time
 
@@ -159,4 +171,5 @@ owner. Rollback: stop tagging, because the cloud module is untouched.
 
 ## Open Questions
 
-- None open. Register 91 turned out to be the slot count (task 8.3).
+- None open. Register 91 is the slot count (`PackSlots`, task 8.3). State also reports total
+  battery voltage (register 92) and the ARM and DSP firmware.
