@@ -141,7 +141,7 @@ func TestStateDecoding(t *testing.T) {
 	want := State{
 		DeviceType: "AC200M", Serial: 2235000000001,
 		DCInputW: 120, ACInputW: 500, ACOutputW: 300, DCOutputW: 45,
-		BatteryPercent: 85, PackCount: 2,
+		BatteryPercent: 85, PackSlots: 2,
 		ACOutputOn: true, DCOutputOn: false,
 	}
 	if got != want {
@@ -199,6 +199,17 @@ func TestPackStale(t *testing.T) {
 
 		if _, err := s.conn.Pack(t.Context(), 2); err == nil {
 			t.Error("Pack(2) with register 96 still 1: error = nil, want an error")
+		}
+	})
+}
+
+func TestPackNotConnected(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := newFakeStation(t, map[uint16]uint16{96: 1}) // 98 (voltage) stays 0
+
+		_, err := s.conn.Pack(t.Context(), 2)
+		if !errors.Is(err, ErrNoPack) {
+			t.Errorf("Pack(2) with 0 V: error = %v, want ErrNoPack", err)
 		}
 	})
 }

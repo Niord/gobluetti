@@ -34,7 +34,8 @@ protocol and register map come from [bluetti_mqtt](https://github.com/warhammerk
   pack** separately (voltage, percent, 16 cell voltages).
 - Controls: AC output and DC output on/off.
 - It is a separate Go module, so cloud-only users do not pull in its Bluetooth dependencies.
-- Not yet checked against a real station.
+- Reading is checked on an AC200MAX; switching outputs is not checked on a real station yet.
+- `state` shows pack slots (3 on the AC200MAX), not connected packs; `pack` on an empty slot reports that no pack is connected.
 
 ```bash
 go install github.com/Niord/gobluetti/ble/cmd/gobluetti-ble@latest

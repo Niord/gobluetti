@@ -59,7 +59,7 @@ func TestFormatState(t *testing.T) {
 	got := formatState(ble.State{
 		DeviceType: "AC200M", Serial: 2235000000001,
 		DCInputW: 120, ACInputW: 500, ACOutputW: 300, DCOutputW: 45,
-		BatteryPercent: 85, PackCount: 2, ACOutputOn: true,
+		BatteryPercent: 85, PackSlots: 2, ACOutputOn: true,
 	})
 	want := `device type: AC200M
 serial: 2235000000001
@@ -68,7 +68,7 @@ ac input: 500 W
 ac output: 300 W
 dc output: 45 W
 battery: 85 %
-packs: 2
+pack slots: 2
 ac output on: on
 dc output on: off
 `

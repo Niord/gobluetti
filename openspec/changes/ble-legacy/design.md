@@ -93,7 +93,7 @@ type State struct {
     DeviceType                                string
     Serial                                    uint64
     DCInputW, ACInputW, ACOutputW, DCOutputW  int
-    BatteryPercent, PackCount                 int
+    BatteryPercent, PackSlots                 int
     ACOutputOn, DCOutputOn                    bool
 }
 type Pack struct {
@@ -141,8 +141,9 @@ tinygo adapter compiles without cgo (BlueZ over D-Bus). Tests never touch a radi
 - [The register map is community reverse-engineering, and AC200MAX may differ from AC200M]
   → Upstream's only AC200MAX-specific fix concerns the internal DC input registers (86–88),
   which we do not read. The real-device check compares our values with the station's display.
-- [Register 91's meaning is uncertain (upstream names it `pack_num_max`)] → It is exposed
-  as reported (`PackCount`) and not used to limit `Pack(n)`. The valid range stays 1–3.
+- [Register 91 counts pack slots, not connected packs (upstream `pack_num_max`; confirmed on an
+  AC200MAX with only its internal pack: 3)] → It is exposed as `PackSlots` and not used to limit
+  `Pack(n)`. An empty slot reads 0 V, so `Pack` returns `ErrNoPack` for it instead of zeros.
 - [Reading a pack writes register 3006] → This is a selector, not a power switch, but it is still
   a write. The spec limits writes to 3006/3007/3008, and the CLI docs say that `pack` selects
   the pack on the station.
@@ -158,5 +159,4 @@ owner. Rollback: stop tagging, because the cloud module is untouched.
 
 ## Open Questions
 
-- Does register 91 report the number of connected packs or a fixed maximum? We find out on the
-  real device. The API exposes it either way, so neither the spec nor the tasks change.
+- None open. Register 91 turned out to be the slot count (task 8.3).

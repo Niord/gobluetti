@@ -165,11 +165,11 @@ ac input: %d W
 ac output: %d W
 dc output: %d W
 battery: %d %%
-packs: %d
+pack slots: %d
 ac output on: %s
 dc output on: %s
 `, s.DeviceType, s.Serial, s.DCInputW, s.ACInputW, s.ACOutputW, s.DCOutputW,
-		s.BatteryPercent, s.PackCount, onOff(s.ACOutputOn), onOff(s.DCOutputOn))
+		s.BatteryPercent, s.PackSlots, onOff(s.ACOutputOn), onOff(s.DCOutputOn))
 }
 
 func formatPack(p ble.Pack) string {

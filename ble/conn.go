@@ -14,7 +14,7 @@ import (
 const (
 	regCoreFirst  = 10 // registers 10-49: device type, serial, power, switches
 	regCoreCount  = 40
-	regPackFirst  = 91 // registers 91-127: pack count and the selected pack
+	regPackFirst  = 91 // registers 91-127: pack slots and the selected pack
 	regPackCount  = 37
 	regPackSelect = 3006
 	regACOutput   = 3007
@@ -32,6 +32,10 @@ var (
 	errTimeout = errors.New("ble: no response from the station within 5s")
 	errClosed  = errors.New("ble: connection closed")
 )
+
+// ErrNoPack reports that no battery pack is connected in the slot Pack read:
+// the station selects the slot but reports 0 V for it.
+var ErrNoPack = errors.New("no battery pack connected")
 
 // link is the GATT connection under a Conn: write sends one frame to ff02,
 // and the owner of the link feeds ff01 notifications to Conn.onNotify.
@@ -147,7 +151,7 @@ type State struct {
 	DCOutputW int // W
 
 	BatteryPercent int // charge of all packs together, %
-	PackCount      int // number of battery packs the station reports
+	PackSlots      int // battery pack slots, 3 on the AC200MAX; not how many packs are connected
 
 	ACOutputOn bool
 	DCOutputOn bool
@@ -176,7 +180,7 @@ func (c *Conn) State(ctx context.Context) (State, error) {
 		ACOutputW:      reg(38),
 		DCOutputW:      reg(39),
 		BatteryPercent: reg(43),
-		PackCount:      int(register(packs, regPackFirst, 91)),
+		PackSlots:      int(register(packs, regPackFirst, 91)),
 		ACOutputOn:     reg(48) == 1,
 		DCOutputOn:     reg(49) == 1,
 	}, nil
@@ -193,7 +197,8 @@ type Pack struct {
 // Pack reads battery pack n, from 1 to 3. The station shows one pack at a
 // time, so Pack first selects pack n on the station (a register write that
 // does not switch any power) and then waits 10 seconds for the pack data to
-// follow, before reading it. Cancelling ctx ends the wait.
+// follow, before reading it. Cancelling ctx ends the wait. When no pack is
+// connected in slot n, Pack returns an error that wraps ErrNoPack.
 func (c *Conn) Pack(ctx context.Context, n int) (Pack, error) {
 	if n < 1 || n > 3 {
 		return Pack{}, fmt.Errorf("ble: pack %d is out of range 1-3", n)
@@ -216,6 +221,9 @@ func (c *Conn) Pack(ctx context.Context, n int) (Pack, error) {
 	reg := func(r uint16) int { return int(register(data, regPackFirst, r)) }
 	if got := reg(96); got != n {
 		return Pack{}, fmt.Errorf("ble: station still shows pack %d after selecting pack %d", got, n)
+	}
+	if reg(98) == 0 {
+		return Pack{}, fmt.Errorf("ble: pack %d: %w", n, ErrNoPack)
 	}
 	cells := make([]float64, 16)
 	for i := range cells {

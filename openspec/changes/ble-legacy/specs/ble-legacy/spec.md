@@ -90,12 +90,16 @@ Reading the state SHALL read registers 10–49 and register 91, and SHALL decode
 device type (registers 10–15, ASCII, trailing NUL bytes dropped), serial number (registers 17–20,
 least significant word first), DC input power W (36), AC input power W (37), AC output power W
 (38), DC output power W (39), battery percent (43), AC output on (48, value 1), DC output on (49,
-value 1), and the number of battery packs the station reports (91). Every register is an unsigned
+value 1), and the pack slot count (91). Every register is an unsigned
 16-bit big-endian value.
 
 #### Scenario: Decoding a state
 - **WHEN** register 37 is `0x01F4`, register 43 is `0x0055`, register 48 is `1`, and register 49 is `0`
 - **THEN** the state has AC input 500 W, battery 85 %, AC output on, and DC output off
+
+#### Scenario: Pack slots are not connected packs
+- **WHEN** an AC200MAX with only its internal pack reports register 91 as `3`
+- **THEN** the state has 3 pack slots, and packs 2 and 3 read as empty slots
 
 ### Requirement: Battery pack selection
 Reading pack `n` SHALL accept `n` from 1 to 3 and reject other values without sending anything.
@@ -115,11 +119,16 @@ context's error.
 After the wait, reading pack `n` SHALL read registers 91–127 and decode: pack number (96), pack
 voltage V (98, value / 100), pack percent (99), and 16 cell voltages V (105–120, each value /
 100). When register 96 does not equal `n`, the read SHALL return an error instead of another
-pack's data.
+pack's data. When register 98 is `0`, no pack is connected in that slot, and the read SHALL
+return an error that wraps `ErrNoPack` instead of zero readings.
 
 #### Scenario: Pack 2 selected
 - **WHEN** pack 2 is read and register 96 is `2`, register 98 is `5312`, and register 99 is `76`
 - **THEN** the result is pack 2 with voltage 53.12 V and 76 %
+
+#### Scenario: Empty pack slot
+- **WHEN** pack 2 is read, register 96 is `2`, and register 98 is `0`
+- **THEN** the read returns an error that wraps `ErrNoPack`
 
 #### Scenario: Pack switch not applied
 - **WHEN** pack 2 is read and register 96 is still `1` after the wait
