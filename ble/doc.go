@@ -18,5 +18,6 @@
 //	state, err := conn.State(ctx)
 //
 // SetACOutput and SetDCOutput switch real outputs: whatever is plugged in
-// loses or gains power.
+// loses or gains power. PowerOff shuts the station down. SetAutoSleep sets
+// how long it waits before sleeping.
 package ble

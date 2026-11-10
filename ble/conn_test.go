@@ -128,9 +128,13 @@ func TestStateDecoding(t *testing.T) {
 		10: 0x4143, 11: 0x3230, 12: 0x304D,
 		// Serial 2235000000001 = 0x0000_0208_6061_8E01, least significant word first.
 		17: 0x8E01, 18: 0x6061, 19: 0x0208, 20: 0x0000,
-		36: 120, 37: 0x01F4, 38: 300, 39: 45,
+		23: 100, 24: 0, 25: 50, 26: 1,
+		36: 120, 37: 0x01F4, 38: 300, 39: 45, 41: 100,
 		43: 0x0055, 48: 1, 49: 0,
-		91: 2,
+		70: 1, 71: 230, 72: 20, 73: 300, 74: 500,
+		86: 48, 87: 1200, 88: 250,
+		91: 2, 92: 5324,
+		3061: 5,
 	}
 	s := newFakeStation(t, regs)
 
@@ -141,7 +145,12 @@ func TestStateDecoding(t *testing.T) {
 	want := State{
 		DeviceType: "AC200M", Serial: 2235000000001,
 		DCInputW: 120, ACInputW: 500, ACOutputW: 300, DCOutputW: 45,
-		BatteryPercent: 85, PackSlots: 2,
+		PowerGenerationKWh: 10,
+		BatteryPercent:     85, BatteryVoltage: 53.24, PackSlots: 2,
+		ARMVersion: "1.00", DSPVersion: "655.86",
+		ACMode: ACInverter, ACVoltageV: 230, ACCurrentA: 2, ACInverterW: 300, ACFrequencyHz: 50,
+		DCInputVoltageV: 48, DCInputMeasuredW: 120, DCInputCurrentA: 2.5,
+		AutoSleep:  SleepNever,
 		ACOutputOn: true, DCOutputOn: false,
 	}
 	if got != want {
@@ -149,7 +158,9 @@ func TestStateDecoding(t *testing.T) {
 	}
 	wantFrames := [][]byte{
 		{0x01, 0x03, 0x00, 0x0A, 0x00, 0x28, 0x65, 0xD6},    // 10-49, from an independent CRC
-		withCRC([]byte{0x01, 0x03, 0x00, 0x5B, 0x00, 0x01}), // 91
+		withCRC([]byte{0x01, 0x03, 0x00, 0x46, 0x00, 0x15}), // 70-90
+		withCRC([]byte{0x01, 0x03, 0x00, 0x5B, 0x00, 0x02}), // 91-92
+		withCRC([]byte{0x01, 0x03, 0x0B, 0xF5, 0x00, 0x01}), // 3061
 	}
 	if !reflect.DeepEqual(s.frames, wantFrames) {
 		t.Errorf("State() frames = % x, want % x", s.frames, wantFrames)
@@ -262,6 +273,18 @@ func TestOutputs(t *testing.T) {
 			wantFrame: []byte{0x01, 0x06, 0x0B, 0xC0, 0x00, 0x01, 0x4A, 0x12},
 			wantReg:   3008, wantValue: 1,
 		},
+		{
+			name:      "power off",
+			set:       func(c *Conn, ctx context.Context) error { return c.PowerOff(ctx) },
+			wantFrame: []byte{0x01, 0x06, 0x0B, 0xF4, 0x00, 0x01, 0x0B, 0xDC},
+			wantReg:   3060, wantValue: 1,
+		},
+		{
+			name:      "sleep 30s",
+			set:       func(c *Conn, ctx context.Context) error { return c.SetAutoSleep(ctx, Sleep30s) },
+			wantFrame: []byte{0x01, 0x06, 0x0B, 0xF5, 0x00, 0x02, 0x1A, 0x1D},
+			wantReg:   3061, wantValue: 2,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -276,6 +299,16 @@ func TestOutputs(t *testing.T) {
 				t.Errorf("set %s: register %d = %d, want %d", tt.name, tt.wantReg, s.regs[tt.wantReg], tt.wantValue)
 			}
 		})
+	}
+}
+
+func TestAutoSleepRejected(t *testing.T) {
+	s := newFakeStation(t, nil)
+	if err := s.conn.SetAutoSleep(t.Context(), 0); err == nil {
+		t.Error("SetAutoSleep(0) error = nil, want an error")
+	}
+	if got := s.frameCount(); got != 0 {
+		t.Errorf("SetAutoSleep(0) wrote %d frames, want 0", got)
 	}
 }
 
@@ -371,8 +404,8 @@ func TestConcurrentRequests(t *testing.T) {
 			})
 		}
 		wg.Wait()
-		if got := s.frameCount(); got != 8 {
-			t.Errorf("4 concurrent State() calls wrote %d frames, want 8", got)
+		if got := s.frameCount(); got != 16 {
+			t.Errorf("4 concurrent State() calls wrote %d frames, want 16", got)
 		}
 	})
 }

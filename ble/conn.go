@@ -12,13 +12,17 @@ import (
 
 // AC200M registers, from bluetti_mqtt core/devices/ac200m.py at ffe9b96.
 const (
-	regCoreFirst  = 10 // registers 10-49: device type, serial, power, switches
-	regCoreCount  = 40
-	regPackFirst  = 91 // registers 91-127: pack slots and the selected pack
-	regPackCount  = 37
-	regPackSelect = 3006
-	regACOutput   = 3007
-	regDCOutput   = 3008
+	regCoreFirst   = 10 // registers 10-49: device type, serial, power, switches
+	regCoreCount   = 40
+	regPackFirst   = 91 // registers 91-127: pack slots and the selected pack
+	regPackCount   = 37
+	regDetailFirst = 70 // registers 70-90: AC path and the DC input sensors
+	regDetailCount = 21
+	regPackSelect  = 3006
+	regACOutput    = 3007
+	regDCOutput    = 3008
+	regPowerOff    = 3060
+	regAutoSleep   = 3061
 )
 
 const (
@@ -140,18 +144,96 @@ func register(data []byte, first, r uint16) uint16 {
 	return binary.BigEndian.Uint16(data[2*(r-first):])
 }
 
+// An ACMode is the AC output path the station reports in register 70.
+type ACMode uint16
+
+// ACStop means the AC output is stopped. The other constants are the paths
+// register 70 can report.
+const (
+	ACStop ACMode = iota
+	ACInverter
+	ACBypassC
+	ACBypassD
+	ACLoadMatch
+)
+
+// String returns the path name, or the raw register value when it is none of these.
+func (m ACMode) String() string {
+	switch m {
+	case ACStop:
+		return "stop"
+	case ACInverter:
+		return "inverter"
+	case ACBypassC:
+		return "bypass-c"
+	case ACBypassD:
+		return "bypass-d"
+	case ACLoadMatch:
+		return "load-match"
+	default:
+		return fmt.Sprintf("%d", m)
+	}
+}
+
+// An AutoSleep is how long the station waits before sleeping (register 3061).
+// The station accepts only these four values.
+type AutoSleep uint16
+
+// Sleep30s is a 30-second wait before sleep. Sleep1m, Sleep5m, and SleepNever
+// are the other values register 3061 accepts.
+const (
+	Sleep30s   AutoSleep = 2
+	Sleep1m    AutoSleep = 3
+	Sleep5m    AutoSleep = 4
+	SleepNever AutoSleep = 5
+)
+
+// String returns the wait, or the raw register value when it is not one of the four.
+func (s AutoSleep) String() string {
+	switch s {
+	case Sleep30s:
+		return "30s"
+	case Sleep1m:
+		return "1m"
+	case Sleep5m:
+		return "5m"
+	case SleepNever:
+		return "never"
+	default:
+		return fmt.Sprintf("%d", s)
+	}
+}
+
 // State is a snapshot of a station's main readings.
 type State struct {
 	DeviceType string // model as the station reports it, such as "AC200M"
 	Serial     uint64
 
-	DCInputW  int // solar or car input, W
+	DCInputW  int // solar or car input, W; register 36
 	ACInputW  int // grid or generator input, W
 	ACOutputW int // W
 	DCOutputW int // W
 
-	BatteryPercent int // charge of all packs together, %
-	PackSlots      int // battery pack slots, 3 on the AC200MAX; not how many packs are connected
+	PowerGenerationKWh float64 // register 41, value / 10; an AC200MAX often reports 0
+
+	BatteryPercent int     // charge of all packs together, %
+	BatteryVoltage float64 // V, all packs together; register 92, value / 100
+	PackSlots      int     // battery pack slots, 3 on the AC200MAX; not how many packs are connected
+
+	ARMVersion string // firmware, such as "4008.05"; registers 23-24
+	DSPVersion string // firmware, such as "4005.08"; registers 25-26
+
+	ACMode        ACMode  // register 70
+	ACVoltageV    int     // register 71
+	ACCurrentA    float64 // register 72, value / 10
+	ACInverterW   int     // register 73, the inverter's own power sensor
+	ACFrequencyHz float64 // register 74, value / 10
+
+	DCInputVoltageV  int     // register 86, V
+	DCInputMeasuredW float64 // register 87, value / 10; finer than DCInputW
+	DCInputCurrentA  float64 // register 88, value / 100
+
+	AutoSleep AutoSleep // register 3061
 
 	ACOutputOn bool
 	DCOutputOn bool
@@ -163,27 +245,56 @@ func (c *Conn) State(ctx context.Context) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	packs, err := c.read(ctx, regPackFirst, 1)
+	detail, err := c.read(ctx, regDetailFirst, regDetailCount)
+	if err != nil {
+		return State{}, err
+	}
+	packs, err := c.read(ctx, regPackFirst, 2)
+	if err != nil {
+		return State{}, err
+	}
+	sleep, err := c.read(ctx, regAutoSleep, 1)
 	if err != nil {
 		return State{}, err
 	}
 	reg := func(r uint16) int { return int(register(core, regCoreFirst, r)) }
+	dreg := func(r uint16) int { return int(register(detail, regDetailFirst, r)) }
 	var serial uint64
 	for i := range uint16(4) {
 		serial |= uint64(register(core, regCoreFirst, 17+i)) << (16 * i)
 	}
 	return State{
-		DeviceType:     string(bytes.TrimRight(core[:12], "\x00")), // registers 10-15
-		Serial:         serial,
-		DCInputW:       reg(36),
-		ACInputW:       reg(37),
-		ACOutputW:      reg(38),
-		DCOutputW:      reg(39),
-		BatteryPercent: reg(43),
-		PackSlots:      int(register(packs, regPackFirst, 91)),
-		ACOutputOn:     reg(48) == 1,
-		DCOutputOn:     reg(49) == 1,
+		DeviceType:         string(bytes.TrimRight(core[:12], "\x00")), // registers 10-15
+		Serial:             serial,
+		DCInputW:           reg(36),
+		ACInputW:           reg(37),
+		ACOutputW:          reg(38),
+		DCOutputW:          reg(39),
+		PowerGenerationKWh: float64(reg(41)) / 10,
+		BatteryPercent:     reg(43),
+		BatteryVoltage:     float64(register(packs, regPackFirst, 92)) / 100,
+		PackSlots:          int(register(packs, regPackFirst, 91)),
+		ARMVersion:         version(register(core, regCoreFirst, 23), register(core, regCoreFirst, 24)),
+		DSPVersion:         version(register(core, regCoreFirst, 25), register(core, regCoreFirst, 26)),
+		ACMode:             ACMode(register(detail, regDetailFirst, 70)),
+		ACVoltageV:         dreg(71),
+		ACCurrentA:         float64(dreg(72)) / 10,
+		ACInverterW:        dreg(73),
+		ACFrequencyHz:      float64(dreg(74)) / 10,
+		DCInputVoltageV:    dreg(86),
+		DCInputMeasuredW:   float64(dreg(87)) / 10,
+		DCInputCurrentA:    float64(dreg(88)) / 100,
+		AutoSleep:          AutoSleep(register(sleep, regAutoSleep, regAutoSleep)),
+		ACOutputOn:         reg(48) == 1,
+		DCOutputOn:         reg(49) == 1,
 	}, nil
+}
+
+// version decodes a firmware field: the first register is the low 16 bits,
+// the second is the high 16 bits, and the 32-bit value is hundredths.
+func version(lo, hi uint16) string {
+	v := uint32(lo) | uint32(hi)<<16
+	return fmt.Sprintf("%d.%02d", v/100, v%100)
 }
 
 // Pack is the data of one battery pack.
@@ -247,6 +358,24 @@ func (c *Conn) SetACOutput(ctx context.Context, on bool) error {
 // switches real power: whatever is plugged into the DC sockets is affected.
 func (c *Conn) SetDCOutput(ctx context.Context, on bool) error {
 	return c.setSwitch(ctx, regDCOutput, on)
+}
+
+// PowerOff shuts the station down with a single command. Whatever is plugged
+// in loses power, and the station stops answering until someone switches it on.
+func (c *Conn) PowerOff(ctx context.Context) error {
+	return c.writeRegister(ctx, regPowerOff, 1)
+}
+
+// SetAutoSleep sets how long the station waits before sleeping. mode must be
+// one of Sleep30s, Sleep1m, Sleep5m, or SleepNever; anything else is rejected
+// without a write.
+func (c *Conn) SetAutoSleep(ctx context.Context, mode AutoSleep) error {
+	switch mode {
+	case Sleep30s, Sleep1m, Sleep5m, SleepNever:
+	default:
+		return fmt.Errorf("ble: auto sleep %d is not 30s, 1m, 5m, or never", mode)
+	}
+	return c.writeRegister(ctx, regAutoSleep, uint16(mode))
 }
 
 func (c *Conn) setSwitch(ctx context.Context, r uint16, on bool) error {
