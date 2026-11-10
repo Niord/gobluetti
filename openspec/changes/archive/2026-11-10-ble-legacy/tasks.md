@@ -54,7 +54,8 @@
   - `state`: battery 83 %, all inputs and outputs 0 W, AC and DC outputs off, register 91 = 3.
   - `pack 1`: 53.19 V, 83 %, 16 cells at 3.31 V, consistent with the 16-cell LiFePO4 pack and the battery level.
   - `pack 2` and `pack 3`: the selector switched (register 96 matched), voltage and cells read 0. No expansion battery is attached, so register 91 is the number of pack slots (upstream `pack_num_max`), not the number of connected packs.
-- [ ] 8.4 Real `set`, only after the owner explicitly confirms that specific command; record the outcome or "not done"
+- [x] 8.4 Real `set`, only after the owner explicitly confirms that specific command; record the outcome or "not done"
+  - 2026-11-10, AC200MAX, run by the owner: `set` switched the output off and back on as commanded; the echo check passed. Writes use GATT write-without-response, which the station accepts.
 - [x] 8.6 Follow-up to 8.3: rename `State.PackCount` to `PackSlots` (CLI: `pack slots`) and make `Pack` return `ErrNoPack` for a slot that reads 0 V; verify `TestPackNotConnected`, the updated state and format tests, and the full gate in `ble/`
 - [x] 8.5 Write the final review summary here
   - Implemented: nested module `github.com/Niord/gobluetti/ble` (`doc.go`, `modbus.go`, `conn.go`, `station.go`) and `ble/cmd/gobluetti-ble`; README (en/uk), LICENSE (bluetti_mqtt notice), `openspec/config.yaml`, CI matrix over both modules.
