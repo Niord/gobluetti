@@ -37,8 +37,9 @@ protocol and register map come from [bluetti_mqtt](https://github.com/warhammerk
   empty slot returns `ErrNoPack`.
 - Controls: AC output and DC output on/off, auto sleep (30s, 1m, 5m, never), and power off.
 - It is a separate Go module, so cloud-only users do not pull in its Bluetooth dependencies.
-- Reading is checked on an AC200MAX; switching outputs is not checked on a real station yet.
-- `state` shows pack slots (3 on the AC200MAX), battery voltage, and ARM and DSP firmware.
+- Checked on an AC200MAX: reading the state and packs, and switching an output.
+- Legacy stations have no Bluetooth pairing or password: anyone within radio range can connect with any BLE tool, including the BLUETTI app. This is the station's protocol, not something the library adds or can prevent.
+- `state` shows pack slots (3 on the AC200MAX), not connected packs, plus battery voltage and ARM and DSP firmware. `pack` on an empty slot reports that no pack is connected.
 
 ```bash
 go install github.com/Niord/gobluetti/ble/cmd/gobluetti-ble@latest

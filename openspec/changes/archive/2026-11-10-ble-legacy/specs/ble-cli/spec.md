@@ -39,9 +39,7 @@ stderr, with a non-zero exit status.
 - **THEN** the tool prints a line confirming the DC output of `AC200M1` is on and exits with 0
 
 ### Requirement: One command per run
-`set` SHALL send exactly one command and nothing else that changes the station. `power off`
-shuts the station down. `state`
-and `pack` SHALL NOT switch any output.
+`set` SHALL send exactly one command and nothing else that changes the station. `power off` shuts the station down. `state` and `pack` SHALL NOT switch any output.
 
 #### Scenario: Pack read does not switch outputs
 - **WHEN** the user runs `gobluetti-ble pack AC200M1 2`

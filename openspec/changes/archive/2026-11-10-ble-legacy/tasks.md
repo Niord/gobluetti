@@ -53,15 +53,16 @@
   - 2026-11-10, AC200MAX, run by the owner. Firmware accepts plaintext frames. `scan` found the station as `AC200M…`, model AC200M, RSSI about −55 dBm.
   - `state`: battery 83–86 %, all inputs and outputs 0 W, AC and DC outputs off, register 91 = 3. Register 92 was 5324 (53.24 V) while pack 3 was selected, so it is the total battery voltage. ARM and DSP firmware decoded as non-zero versions in the 4000 range.
   - `pack 1`: 53.19 V, 83 %, 16 cells at 3.31 V, consistent with the 16-cell LiFePO4 pack and the battery level.
-  - `pack 2` and `pack 3`: the selector switched (register 96 matched), voltage and cells read 0. No expansion battery is attached, so register 91 is the number of pack slots (upstream `pack_num_max`), not the number of connected packs. `set` was not run.
-- [ ] 8.4 Real `set`, only after the owner explicitly confirms that specific command; record the outcome or "not done"
+  - `pack 2` and `pack 3`: the selector switched (register 96 matched), voltage and cells read 0. No expansion battery is attached, so register 91 is the number of pack slots (upstream `pack_num_max`), not the number of connected packs.
+- [x] 8.4 Real `set`, only after the owner explicitly confirms that specific command; record the outcome or "not done"
+  - 2026-11-10, AC200MAX, run by the owner: `set` switched the output off and back on as commanded; the echo check passed. Writes use GATT write-without-response, which the station accepts.
 - [x] 8.6 Follow-up to 8.3: rename `State.PackCount` to `PackSlots` (CLI: `pack slots`) and make `Pack` return `ErrNoPack` for a slot that reads 0 V; verify `TestPackNotConnected`, the updated state and format tests, and the full gate in `ble/`
 - [x] 8.5 Write the final review summary here
   - Implemented: nested module `github.com/Niord/gobluetti/ble` (`doc.go`, `modbus.go`, `conn.go`, `station.go`) and `ble/cmd/gobluetti-ble`; README (en/uk), LICENSE (bluetti_mqtt notice), `openspec/config.yaml`, CI matrix over both modules.
   - Spec coverage: every ble-legacy requirement except Discovery and Connection is tested through a fake station (`conn_test.go`, timing under `testing/synctest`). Supported stations has a table test. Discovery and Connection are thin tinygo calls, compiled for three OSes but not exercised without a radio. ble-cli is covered by parse, usage-before-BLE, and format tests.
   - Deviations from upstream: no retries (upstream retries 5×), and the pack read verifies register 96. Both are recorded in design.md.
   - Implementation choice not in the design: writes use GATT write-without-response, as bleak's default in bluetti_mqtt does. If a station rejects it, switch to `Write` (one line in `gattLink.write`).
-  - Answered by 8.3: the AC200MAX firmware accepts plaintext frames, and register 91 is the slot count (see 8.6). State also reports battery voltage and ARM/DSP firmware. `set` (8.4) is still not done.
+  - Answered by 8.3: the AC200MAX firmware accepts plaintext frames, and register 91 is the slot count (see 8.6). State also reports battery voltage and ARM/DSP firmware. Answered by 8.4: `set` switched an output off and back on.
 
 ## Workflow follow-up
 
